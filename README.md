@@ -40,6 +40,7 @@ No bloatware. No sketchy overclocking tools. Just `powercfg`, the Windows regist
 - [GPU Tuning](#-gpu-tuning)
 - [Profile Comparison](#-profile-comparison)
 - [Toggle Scripts](#-toggle-scripts)
+- [Ryzen CPU Tuning](#-ryzen-cpu-tuning)
 - [Verification](#-verification)
 - [Pitfalls & Notes](#-pitfalls--notes)
 
@@ -300,7 +301,7 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\NVIDIA Corporation\Global\NvCplApi\Polici
 
 Save these as `.ps1` files for one-click switching between modes.
 
-### `toggle-ac.ps1` — Plugin in, blast off
+### `toggle-ac.ps1` — Plugged in, blast off
 
 ```powershell
 param([switch]$Ultimate)
@@ -455,26 +456,28 @@ The governor checks processor utilization at `PERFCHECK` intervals (15ms on AC, 
 AMD systems expose a **different subset** of hidden processor settings. Before tuning, check what's available on your system:
 
 ```powershell
-# Expose all hidden processor settings
-$settings = @(
-    '06cadf0e-64ed-448a-8927-ce7bf90eb35d',  # PERFINCTHRESHOLD
-    '12a0ab44-fe28-4fa9-b3bd-4b64f449261a',  # PERFDECTHRESHOLD
-    '465e1f50-b610-423a-ab85-6cd2a9ed1f2c',  # PERFINCPOL
-    'd8eeb4b2-8b0a-4f7b-a0c6-82d8a4c8e3b0',  # PERFDECPOL
-    '984cf492-3bed-4488-a8f9-4286c97bf5a5',  # PERFINCTIME
-    '40e0accd-a7b9-4bff-a821-3f2e7b8f2b9c',  # PERFDECTIME
-    'be337238-0d82-4146-a960-4f3749d470c7',  # PERFBOOSTMODE
-    '0cc5b647-c1df-4637-891a-dec35c318583',  # Core Parking Min Cores
-    'ea062031-0e34-4ff1-9b6d-eb1059334028'   # Core Parking Max Cores
-)
+# Expose all hidden processor settings (validated GUIDs)
+$settings = @{
+    'PERFINCTHRESHOLD'    = '06cadf0e-64ed-448a-8927-ce7bf90eb35d'
+    'PERFDECTHRESHOLD'    = '12a0ab44-fe28-4fa9-b3bd-4b64f44960a6'
+    'PERFINCTIME'         = '984cf492-3bed-4488-a8f9-4286c97bf5aa'
+    'PERFDECTIME'         = 'd8edeb9b-95cf-4f95-a73c-b061973693c8'
+    'PERFBOOSTMODE'       = 'be337238-0d82-4146-a960-4f3749d470c7'
+    'CPMINCORES'          = '0cc5b647-c1df-4637-891a-dec35c318583'
+    'CPMAXCORES'          = 'ea062031-0e34-4ff1-9b6d-eb1059334028'
+}
 
-foreach ($guid in $settings) {
-    powercfg -attributes SUB_PROCESSOR $guid -ATTRIB_HIDE
-    $result = powercfg -q SCHEME_CURRENT SUB_PROCESSOR $guid 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "✅ $guid — available" -ForegroundColor Green
+$available = @{}
+$settings.Keys | ForEach-Object {
+    powercfg -attributes SUB_PROCESSOR $settings[$_] -ATTRIB_HIDE
+    if ((powercfg -q SCHEME_CURRENT SUB_PROCESSOR $settings[$_] 2>&1) -like '*Power Setting*') {
+        $available[$_] = $settings[$_]
+        Write-Host "✅ $_ — available" -ForegroundColor Green
+    } else {
+        Write-Host "❌ $_ — not found" -ForegroundColor Red
     }
 }
+Write-Host "`nAvailable on this system: $($available.Count)/$($settings.Count)" -ForegroundColor Cyan
 ```
 
 ### Available Settings — AMD (Ryzen 5000 tested)
@@ -487,8 +490,8 @@ On most AMD systems (tested on Ryzen 5 5600X, A520 chipset), you'll find:
 | **Increase Threshold** | `PERFINCTHRESHOLD` | ✅ Always | 0-100%. Lower = snappier boost. Try **5-10%** for responsive feel |
 | **Min Processor State** | `PROCTHROTTLEMIN` | ✅ Always | **5%** recommended — keeps CPU out of deepest C-states without wasting power |
 | **Max Processor State** | `PROCTHROTTLEMAX` | ✅ Always | Keep at **100%** |
-| **Core Parking Min %** | `CPMINCORES` | ✅ Always | **100%** to keep all cores available |
-| **Core Parking Max %** | `CPMAXCORES` | ✅ Always | **100%** |
+| **Core Parking Min %** | — | ✅ Always | **100%** to keep all cores available |
+| **Core Parking Max %** | — | ✅ Always | **100%** |
 | **System Cooling** | `SYSCOOLPOL` | ✅ Always | 0=Passive, **1=Active** (desktop) |
 | **Decrease Threshold** | `PERFDECTHRESHOLD` | ❌ Often missing | Not available on many AMD systems |
 | **Increase/Decrease Time** | `PERFINCTIME` / `PERFDECTIME` | ❌ Often missing | AMD controls timing differently |
@@ -509,8 +512,6 @@ powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PERFINCTHRESHOLD 5
 powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMIN 5
 powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMAX 100
 powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR SYSCOOLPOL 1
-powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR CPMINCORES 100
-powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR CPMAXCORES 100
 
 Write-Host "✅ Ryzen AC profile applied" -ForegroundColor Green
 ```
@@ -521,7 +522,6 @@ Write-Host "✅ Ryzen AC profile applied" -ForegroundColor Green
 | **Increase Threshold** | **5%** | Tiny load triggers boost — instant response |
 | **Min State** | **5%** | Idles deep enough to save power, but avoids deepest C-state lag |
 | **Max State** | **100%** | Full frequency available |
-| **Core Parking** | **100%** | All cores unparked — zero wake latency |
 | **Cooling** | **Active** | Fans spin up under load |
 
 #### 🔋 DC — Battery Efficient (laptops)
