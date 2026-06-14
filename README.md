@@ -446,6 +446,217 @@ The governor checks processor utilization at `PERFCHECK` intervals (15ms on AC, 
 
 ---
 
+## 🐉 Ryzen CPU Tuning
+
+*While ONSLAUGHT was born on Intel, the same powercfg science applies to AMD Ryzen — with important differences in what settings are available.*
+
+### ⚠️ Key Differences: AMD vs Intel
+
+AMD systems expose a **different subset** of hidden processor settings. Before tuning, check what's available on your system:
+
+```powershell
+# Expose all hidden processor settings
+$settings = @(
+    '06cadf0e-64ed-448a-8927-ce7bf90eb35d',  # PERFINCTHRESHOLD
+    '12a0ab44-fe28-4fa9-b3bd-4b64f449261a',  # PERFDECTHRESHOLD
+    '465e1f50-b610-423a-ab85-6cd2a9ed1f2c',  # PERFINCPOL
+    'd8eeb4b2-8b0a-4f7b-a0c6-82d8a4c8e3b0',  # PERFDECPOL
+    '984cf492-3bed-4488-a8f9-4286c97bf5a5',  # PERFINCTIME
+    '40e0accd-a7b9-4bff-a821-3f2e7b8f2b9c',  # PERFDECTIME
+    'be337238-0d82-4146-a960-4f3749d470c7',  # PERFBOOSTMODE
+    '0cc5b647-c1df-4637-891a-dec35c318583',  # Core Parking Min Cores
+    'ea062031-0e34-4ff1-9b6d-eb1059334028'   # Core Parking Max Cores
+)
+
+foreach ($guid in $settings) {
+    powercfg -attributes SUB_PROCESSOR $guid -ATTRIB_HIDE
+    $result = powercfg -q SCHEME_CURRENT SUB_PROCESSOR $guid 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "✅ $guid — available" -ForegroundColor Green
+    }
+}
+```
+
+### Available Settings — AMD (Ryzen 5000 tested)
+
+On most AMD systems (tested on Ryzen 5 5600X, A520 chipset), you'll find:
+
+| Setting | Alias | Availability | Notes |
+|---------|-------|-------------|-------|
+| **Boost Mode** | `PERFBOOSTMODE` | ✅ Always | 0=Disabled, 1=Enabled, 2=Aggressive, 3=Efficient Enabled, **4=Efficient Aggressive**, 5=Aggressive At Guaranteed, 6=Efficient Aggressive At Guaranteed |
+| **Increase Threshold** | `PERFINCTHRESHOLD` | ✅ Always | 0-100%. Lower = snappier boost. Try **5-10%** for responsive feel |
+| **Min Processor State** | `PROCTHROTTLEMIN` | ✅ Always | **5%** recommended — keeps CPU out of deepest C-states without wasting power |
+| **Max Processor State** | `PROCTHROTTLEMAX` | ✅ Always | Keep at **100%** |
+| **Core Parking Min %** | `CPMINCORES` | ✅ Always | **100%** to keep all cores available |
+| **Core Parking Max %** | `CPMAXCORES` | ✅ Always | **100%** |
+| **System Cooling** | `SYSCOOLPOL` | ✅ Always | 0=Passive, **1=Active** (desktop) |
+| **Decrease Threshold** | `PERFDECTHRESHOLD` | ❌ Often missing | Not available on many AMD systems |
+| **Increase/Decrease Time** | `PERFINCTIME` / `PERFDECTIME` | ❌ Often missing | AMD controls timing differently |
+| **Increase/Decrease Policy** | `PERFINCPOL` / `PERFDECPOL` | ❌ Often missing | Not available on many AMD systems |
+| **Boost Policy** | `PERFBOOSTPOL` | ❌ Missing | Intel-only |
+| **Energy Perf Preference** | `PERFEPP` | ❌ Missing | Intel-only |
+
+> AMD systems have **fewer powercfg tunables** than Intel. The main levers are **Boost Mode** and **Increase Threshold** for performance tuning, and **Min Processor State** for idle behavior.
+
+### 🎯 Recommended AMD Profiles
+
+#### 🔥 AC — Responsive Desktop/Gaming
+
+```powershell
+# ── AC: Responsive ──
+powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PERFBOOSTMODE 4
+powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PERFINCTHRESHOLD 5
+powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMIN 5
+powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMAX 100
+powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR SYSCOOLPOL 1
+powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR CPMINCORES 100
+powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR CPMAXCORES 100
+
+Write-Host "✅ Ryzen AC profile applied" -ForegroundColor Green
+```
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| **Boost Mode** | **4 (Efficient Aggressive)** | Boosts precisely when needed, not always at max — better than plain "Aggressive" for Ryzen's boost algorithm |
+| **Increase Threshold** | **5%** | Tiny load triggers boost — instant response |
+| **Min State** | **5%** | Idles deep enough to save power, but avoids deepest C-state lag |
+| **Max State** | **100%** | Full frequency available |
+| **Core Parking** | **100%** | All cores unparked — zero wake latency |
+| **Cooling** | **Active** | Fans spin up under load |
+
+#### 🔋 DC — Battery Efficient (laptops)
+
+```powershell
+# ── DC: Battery Efficient ──
+powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PERFBOOSTMODE 3
+powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PERFINCTHRESHOLD 80
+powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMIN 5
+powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR PROCTHROTTLEMAX 100
+powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_PROCESSOR SYSCOOLPOL 0
+
+Write-Host "✅ Ryzen DC profile applied" -ForegroundColor Green
+```
+
+| Setting | Value | Why |
+|---------|-------|-----|
+| **Boost Mode** | **3 (Efficient Enabled)** | Smart turbo — boosts when needed, not always |
+| **Increase Threshold** | **80%** | Ignores micro-bursts (scrolling, typing). Only boosts for real work |
+| **Min State** | **5%** | Deep idle saves power |
+| **Max State** | **100%** | Turbo still available when needed |
+| **Cooling** | **Passive** | Throttle instead of spinning fans |
+
+### 💡 Beyond powercfg: Real Ryzen Performance Tuning
+
+Powercfg gets you 70% of the way. For the rest, you need BIOS or platform-specific tools:
+
+#### PBO (Precision Boost Overdrive)
+Lets your CPU boost higher and longer by raising power limits (PPT/TDC/EDC).
+
+```
+Stock:    4.6 GHz boost, 65W PPT
+PBO:      4.65-4.85 GHz boost, 88-142W PPT (depends on motherboard)
+```
+
+- **B550/X570**: Full PBO + Curve Optimizer in BIOS  
+- **A520**: May have limited PBO — check BIOS  
+- **Ryzen Master**: Adjust PBO from Windows without rebooting  
+
+#### Curve Optimizer
+Undervolts each core to reduce heat and allow higher sustained boost.
+
+```
+Stock:         1.25V → 4.6 GHz boost, 80°C under load
+-10 CO:        1.18V → 4.65 GHz boost, 72°C under load  
+-20 CO:        1.12V → 4.7 GHz boost, 65°C under load
+```
+
+- **B550/X570**: ✅ Supported in BIOS  
+- **A520**: ❌ Not supported (chipset limitation)  
+- **UXTU (Universal x86 Tuning Utility)**: Can sometimes enable CO on unsupported chipsets — YMMV  
+
+#### RAM Tuning — The Real Bottleneck
+
+Ryzen's Infinity Fabric runs at 1:1 with memory clock up to ~3733 MHz.  
+**3600 MHz CL16** is the sweet spot for Ryzen 5000.
+
+| RAM Speed | Fabric Clock | Latency | Performance |
+|-----------|-------------|---------|-------------|
+| 3200 MHz | 1600 MHz | Good | Stock |
+| **3600 MHz** | **1800 MHz** | **Best** | **~10% uplift** |
+| 3800 MHz | 1900 MHz | Great | Hard to stabilize |
+| 4000+ MHz | 2000 MHz | ??? | Desyncs fabric — worse perf |
+
+Enable **DOCP** (AMD's XMP) in BIOS to get your RAM to its rated speed.
+
+### ⚡ Per-Chipset Quick Reference
+
+| Chipset | Multiplier OC | PBO | Curve Optimizer | RAM OC | Best For |
+|---------|:---:|:---:|:---:|:---:|---------|
+| **A520** | ❌ | ⚠️ BIOS check | ❌ | ✅ | Budget builds, office |
+| **B550** | ✅ | ✅ | ✅ | ✅ | Gaming, enthusiast |
+| **X570** | ✅ | ✅ | ✅ | ✅ | High-end, workstation |
+| **A620** | ❌ | ⚠️ Limited | ❌ | ✅ | Ultra-budget AM5 |
+| **B650** | ✅ | ✅ | ✅ | ✅ | Modern gaming |
+| **X670/X870** | ✅ | ✅ | ✅ | ✅ | Flagship |
+
+### 🔍 Verify Ryzen Settings
+
+```powershell
+# Check what's currently active
+$ryzenSettings = @{
+    'Boost Mode'      = 'be337238-0d82-4146-a960-4f3749d470c7'
+    'Inc Threshold'   = '06cadf0e-64ed-448a-8927-ce7bf90eb35d'
+    'Min State'       = '893dee8e-2bef-41e0-89c6-b55d0929964c'
+    'Max State'       = 'bc5038f7-23e0-4960-96da-33abaf5935ec'
+    'Core Park Min'   = '0cc5b647-c1df-4637-891a-dec35c318583'
+    'Core Park Max'   = 'ea062031-0e34-4ff1-9b6d-eb1059334028'
+    'Cooling Policy'  = '94d3a615-a899-4ac5-ae2b-e4d8f634367f'
+}
+
+Write-Host "`n🐉 Ryzen Power Settings:" -ForegroundColor Cyan
+$scheme = (powercfg -getactivescheme) -match '[a-f0-9\-]{36}' | Select-Object -First 1
+$schemeGuid = $matches[0]
+
+$ryzenSettings.Keys | ForEach-Object {
+    $ac = (powercfg -q $schemeGuid SUB_PROCESSOR $ryzenSettings[$_] | Select-String 'AC Power Setting Index') -replace '.*Index: (0x[0-9a-f]+)', '$1'
+    $dc = (powercfg -q $schemeGuid SUB_PROCESSOR $ryzenSettings[$_] | Select-String 'DC Power Setting Index') -replace '.*Index: (0x[0-9a-f]+)', '$1'
+    Write-Host "  $_ → AC: $ac  |  DC: $dc"
+}
+
+# Check current CPU frequency
+$cpu = Get-CimInstance Win32_Processor
+Write-Host "`n📊 $($cpu.Name) @ $($cpu.CurrentClockSpeed) MHz / $($cpu.MaxClockSpeed) MHz max" -ForegroundColor Cyan
+```
+
+### 🧠 Ryzen Tuning Philosophy
+
+```
+AMD Ryzen boost behavior is fundamentally different from Intel:
+
+Intel:  Multiplier-based turbo — fixed bins above base clock
+        Powercfg controls: lots (boost policy, EPP, thresholds, timers)
+
+AMD:    Frequency/voltage curve — continuous boost range
+        Powercfg controls: few (boost mode, threshold, min/max state)
+
+            ┌────────────────────────────────────────────┐
+            │  AMD's boost logic lives in the firmware   │
+            │  (SMU — System Management Unit), not the   │
+            │  Windows power governor. That's why most   │
+            │  of the Intel powercfg settings are absent │
+            │  on AMD — they'd be ignored anyway.        │
+            └────────────────────────────────────────────┘
+
+To truly tune Ryzen, you need firmware-level tools:
+  • BIOS:     PBO, Curve Optimizer, DOCP
+  • Ryzen Master: PBO from Windows, monitoring
+  • UXTU:     PBO + CO from Windows (A520 may work)
+```
+
+**Bottom line:** Powercfg gets you snappy boost and deep idle on Ryzen. Unlocking the *real* performance headroom (PBO, Curve Optimizer, RAM overclocking) requires firmware access via BIOS or specialized tools.
+
+---
+
 ## 📜 License
 
 MIT — use it, share it, tweak it, roast it.
