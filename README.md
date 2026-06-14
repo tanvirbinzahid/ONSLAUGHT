@@ -183,7 +183,7 @@ Write-Host "✅ DC profile applied — battery mode"
 | **Intel Graphics** | Power Plan | **2** (Max Performance) | iGPU runs at full speed |
 | **PCI Express** | ASPM | **0** (Off) | No PCIe link power gating — zero latency |
 
-### NVHDA Setting (AC — requires Admin)
+### NVIDIA Setting (AC — requires Admin)
 
 ```powershell
 # Prefer Maximum Performance for NVIDIA GPU
